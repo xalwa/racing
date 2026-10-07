@@ -1,0 +1,12 @@
+/race
+/tests/race_tests
+/race.log
+*.o
+__pycache__/
+*.pyc
+.venv/
+~$*.docx
+/examples.log
+/output
+REPORT.md
+/examples
