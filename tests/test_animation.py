@@ -12,15 +12,17 @@ import sys
 import tempfile
 import termios
 import time
+from animation_trace import check_frames
+from test_cli import check_trace
 
 BINARY = str(pathlib.Path(sys.argv[1]).resolve())
 BASE = ["--teams", "1", "--cars", "1", "--lanes", "1", "--length", "3", "--laps", "1"]
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
-def terminal(args, stop_signal=None, term="xterm"):
+def terminal(args, stop_signal=None, term="xterm", columns=80, rows=24, stderr_contains=None):
     master, slave = os.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
     environment = dict(os.environ, TERM=term)
     process = subprocess.Popen([BINARY, *args], stdin=subprocess.DEVNULL,
                                stdout=slave, stderr=subprocess.PIPE, env=environment)
@@ -48,7 +50,10 @@ def terminal(args, stop_signal=None, term="xterm"):
                 break
         code = process.wait(timeout=1)
         stderr = process.stderr.read().decode()
-        assert not stderr, stderr
+        if stderr_contains is None:
+            assert not stderr, stderr
+        else:
+            assert stderr_contains in stderr, stderr
         if stop_signal is not None:
             assert stopped is not None
             assert time.monotonic() - stopped < 2.5, "Сигнал должен отменять длинную задержку"
@@ -95,9 +100,17 @@ with tempfile.TemporaryDirectory(prefix="akos-animation-") as folder:
     assert code == 0 and log.read_text() == plain
     assert "\x1b" not in log.read_text()
 
-for option in (["--no-animation"], ["--delay", "0"], ["--quiet"]):
+plain_text, code, _ = terminal(BASE + ["--no-animation"])
+assert code == 0
+for option in (["--no-animation"], ["--delay", "0"], ["--quiet"],
+               ["--no-animation", "--delay", "1"],
+               ["--delay", "1", "--no-animation"],
+               ["--no-animation", "--delay", "5000"],
+               ["--delay", "5000", "--no-animation"]):
     text, code, _ = terminal(BASE + option)
-    assert code == 0 and "\x1b" not in text
+    assert code == 0 and "\x1b" not in text, option
+    if "--no-animation" in option:
+        assert text == plain_text, "--no-animation должен иметь приоритет независимо от порядка аргументов"
 text, code, _ = terminal(BASE, term="dumb")
 assert code == 0 and "\x1b" not in text
 
@@ -132,5 +145,46 @@ for frame in frames(text):
         assert car not in cells, "Сошедшая машина должна быть снята в кадре схода"
 assert retirements == 22, retirements
 
+frame_count = step_count = 0
+with tempfile.TemporaryDirectory(prefix="akos-frame-trace-") as folder:
+    scenarios = [
+        (BASE, 1, 1, 1, 3, 1, 80, 24),
+        (["--teams", "8", "--cars", "4", "--length", "33", "--lanes", "2",
+          "--laps", "2", "--strategy", "random", "--seed", "0"], 8, 4, 2, 33, 2, 80, 24),
+        (["--teams", "8", "--cars", "4", "--length", "120", "--lanes", "6",
+          "--laps", "1", "--rounds", "1", "--strategy", "random", "--seed", "7"], 8, 4, 6, 120, 1, 80, 24),
+        (["--teams", "4", "--cars", "3", "--length", "24", "--lanes", "4",
+          "--laps", "1", "--strategy", "random", "--seed", "3"], 4, 3, 4, 24, 1, 100, 30),
+    ]
+    for index, (args, teams, cars, lanes, length, laps, columns, rows) in enumerate(scenarios):
+        log = pathlib.Path(folder) / f"race-{index}.log"
+        text, code, _ = terminal([*args, "--delay", "1", "--log", str(log)], columns=columns, rows=rows)
+        assert code == 0
+        trace = log.read_text()
+        check_trace(trace, teams, cars, lanes, length, laps)
+        plain = subprocess.run([BINARY, *args], capture_output=True, text=True, check=True, timeout=10).stdout
+        assert trace == plain and "\x1b" not in trace
+        checked, moved = check_frames(text, trace, teams, cars, lanes, length, laps, columns, rows)
+        frame_count += checked
+        step_count += moved
+
+        quiet_log = pathlib.Path(folder) / f"quiet-{index}.log"
+        quiet_text, code, _ = terminal([*args, "--quiet", "--log", str(quiet_log)])
+        assert code == 0 and "\x1b" not in quiet_text
+        assert "Результаты команд" in quiet_text and "Маршрут:" not in quiet_text
+        assert quiet_log.read_text() == trace, "--quiet не должен обрезать журнал"
+
+    text, code, _ = terminal(BASE + ["--log", str(pathlib.Path(folder) / "missing" / "race.log")],
+                             stderr_contains="Не удалось открыть журнал")
+    assert code == 1 and "\x1b" not in text
+
+if pathlib.Path("/dev/full").exists():
+    text, code, _ = terminal(BASE + ["--delay", "1", "--log", "/dev/full"], stderr_contains="журнал")
+    assert code == 1 and "\x1b[?25h\x1b[?1049l" in text
+    assert "Результаты команд" in text
+
 print("Анимация: переходы, порядок, маршруты, блокировки, сход, журнал, экран и сигналы проверены.")
+print(f"Покадровая сверка: {frame_count} кадров, {step_count} переходов в четырёх гонках совпали с журналами.")
+print("Журналы анимации, текстового режима и --quiet совпали; ошибки файла и восстановление терминала проверены.")
+print("--no-animation отключает кадры и паузы при обоих порядках --delay 1 и --delay 5000.")
 print("Пример кадра:\n" + sample_frame.split("Число в клетке", 1)[0])

@@ -10,3 +10,4 @@ __pycache__/
 /output
 REPORT.md
 /examples
+/tests/thread_tests

@@ -174,62 +174,92 @@ def check_trace(text, teams, cars, lanes, length, laps):
     assert f"Раундов: {rounds}." in text
 
 
-normal = run()
-assert normal == run(["--no-animation"]) == run(["--delay", "5000"])
-assert "\x1b" not in normal, "При перенаправлении вывода анимация выключается"
-assert normal == run(), "Одинаковый seed должен давать одинаковый журнал"
-check_trace(normal, 3, 2, 4, 24, 2)
-assert "не завершила" in run(["--rounds", "1", "--quiet"])
-assert "Использование" in run(["--help"])
+if __name__ == "__main__":
+    normal = run()
+    assert normal == run(["--no-animation"]) == run(["--delay", "5000"])
+    assert "\x1b" not in normal, "При перенаправлении вывода анимация выключается"
+    assert normal == run(), "Одинаковый seed должен давать одинаковый журнал"
+    check_trace(normal, 3, 2, 4, 24, 2)
+    assert "не завершила" in run(["--rounds", "1", "--quiet"])
+    assert "Использование" in run(["--help"])
 
-for strategy in ("greedy", "random"):
-    for seed in range(10):
-        teams, cars, lanes, length, laps = 1 + seed % 8, 1 + seed % 4, 1 + seed % 6, 33 + seed, 1 + seed % 3
-        args = ["--teams", str(teams), "--cars", str(cars), "--lanes", str(lanes),
-                "--length", str(length), "--laps", str(laps), "--strategy", strategy,
-                "--seed", str(seed), "--rounds", "200"]
-        check_trace(run(args), teams, cars, lanes, length, laps)
-check_trace(run(["--teams", "8", "--cars", "4", "--length", "33", "--lanes", "6", "--laps", "1"]), 8, 4, 6, 33, 1)
-check_trace(run(["--teams", "1", "--cars", "1", "--length", "3", "--lanes", "1", "--laps", "1"]), 1, 1, 1, 3, 1)
-check_trace(run(["--lanes", "1", "--length", "7", "--laps", "1"]), 3, 2, 1, 7, 1)
-check_trace(run(["--rounds", "1"]), 3, 2, 4, 24, 2)
-crowded = run(["--teams", "8", "--cars", "4", "--length", "33", "--lanes", "2",
-               "--laps", "2", "--strategy", "random", "--seed", "0"])
-assert "Нулевой ход" in crowded and " сход\n" in crowded
-check_trace(crowded, 8, 4, 2, 33, 2)
-run(["--seed", "4294967295", "--quiet"])
+    for strategy in ("greedy", "random"):
+        for seed in range(10):
+            teams, cars, lanes, length, laps = 1 + seed % 8, 1 + seed % 4, 1 + seed % 6, 33 + seed, 1 + seed % 3
+            args = ["--teams", str(teams), "--cars", str(cars), "--lanes", str(lanes),
+                    "--length", str(length), "--laps", str(laps), "--strategy", strategy,
+                    "--seed", str(seed), "--rounds", "200"]
+            check_trace(run(args), teams, cars, lanes, length, laps)
+    check_trace(run(["--teams", "8", "--cars", "4", "--length", "33", "--lanes", "6", "--laps", "1"]), 8, 4, 6, 33, 1)
+    check_trace(run(["--teams", "1", "--cars", "1", "--length", "3", "--lanes", "1", "--laps", "1"]), 1, 1, 1, 3, 1)
+    check_trace(run(["--lanes", "1", "--length", "7", "--laps", "1"]), 3, 2, 1, 7, 1)
+    check_trace(run(["--rounds", "1"]), 3, 2, 4, 24, 2)
+    crowded = run(["--teams", "8", "--cars", "4", "--length", "33", "--lanes", "2",
+                   "--laps", "2", "--strategy", "random", "--seed", "0"])
+    assert "Нулевой ход" in crowded and " сход\n" in crowded
+    check_trace(crowded, 8, 4, 2, 33, 2)
+    run(["--seed", "4294967295", "--quiet"])
 
-invalid = [["--teams", "0"], ["--teams", "9"], ["--cars", "5"], ["--length", "121"],
-           ["--lanes", "0"], ["--laps", "101"], ["--rounds", "10001"], ["--length", "6"],
-           ["--seed", "-1"], ["--seed", "4294967296"], ["--seed", "99999999999999999999999"],
-           ["--teams", "2abc"], ["--teams", ""], ["--teams", " 2"], ["--teams", "+2"],
-           ["--rounds", "0"], ["--strategy", "unknown"], ["--teams"], ["--unknown"],
-           ["--log", "--quiet"], ["--delay", "-1"], ["--delay", "5001"], ["--delay"]]
-for args in invalid:
-    run(args, expected=1)
+    invalid = [["--teams", "0"], ["--teams", "9"], ["--cars", "5"], ["--length", "121"],
+               ["--lanes", "0"], ["--laps", "101"], ["--rounds", "10001"], ["--length", "6"],
+               ["--seed", "-1"], ["--seed", "4294967296"], ["--seed", "99999999999999999999999"],
+               ["--teams", "2abc"], ["--teams", ""], ["--teams", " 2"], ["--teams", "+2"],
+               ["--rounds", "0"], ["--strategy", "unknown"], ["--teams"], ["--unknown"],
+               ["--log", "--quiet"], ["--delay", "-1"], ["--delay", "5001"], ["--delay"],
+               ["--cars", "0"], ["--lanes", "7"], ["--length", "2"], ["--laps", "0"],
+               ["--teams", "-1"], ["--teams", "8", "--cars", "4", "--length", "32"]]
+    for args in invalid:
+        run(args, expected=1)
 
-with tempfile.TemporaryDirectory(prefix="akos-tests-") as folder:
-    log = pathlib.Path(folder) / "race.log"
-    run(["--quiet", "--log", str(log)])
-    assert log.read_text() == normal, "Журнал должен сохранять все события даже при --quiet"
-    run(["--log", str(pathlib.Path(folder) / "missing" / "race.log")], expected=1)
+    with tempfile.TemporaryDirectory(prefix="akos-tests-") as folder:
+        log = pathlib.Path(folder) / "race.log"
+        run(["--quiet", "--log", str(log)])
+        assert log.read_text() == normal, "Журнал должен сохранять все события даже при --quiet"
+        run(["--log", str(pathlib.Path(folder) / "missing" / "race.log")], expected=1)
 
-if pathlib.Path("/dev/full").exists():
-    run(["--log", "/dev/full", "--quiet"], expected=1)
+    if pathlib.Path("/dev/full").exists():
+        run(["--log", "/dev/full", "--quiet"], expected=1)
+        with open("/dev/full", "w") as sink:
+            result = subprocess.run([BINARY, "--quiet"], stdout=sink, stderr=subprocess.PIPE, timeout=10)
+            assert result.returncode == 1, "Ошибка записи stdout должна давать код 1"
 
-for stop_signal in (signal.SIGINT, signal.SIGTERM):
-    process = subprocess.Popen([BINARY, "--teams", "8", "--cars", "4", "--length", "120",
-                                "--laps", "100", "--rounds", "10000", "--strategy", "random"],
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
-    first_line = process.stdout.readline()  # Обработчик уже установлен; большой вывод удерживает процесс живым.
-    assert first_line.decode().startswith("Автогонки:")
-    process.send_signal(stop_signal)
-    stdout, stderr = process.communicate(timeout=10)
-    stdout = stdout.decode()
-    stderr = stderr.decode()
-    assert process.returncode == 128 + stop_signal, (process.returncode, stderr)
-    assert "прерывание пользователем" in stdout
-    assert "Результаты команд" in stdout
-    check_trace(first_line.decode() + stdout, 8, 4, 4, 120, 100)
+    # Одновременно максимальные числа машин, дорожек, клеток, кругов,
+    # раундов и seed. Проверяем принятие конфигурации и итоговые границы.
+    for strategy in ("greedy", "random"):
+        maximum = run(["--teams", "8", "--cars", "4", "--lanes", "6", "--length", "120",
+                       "--laps", "100", "--rounds", "10000", "--seed", "4294967295",
+                       "--strategy", strategy, "--quiet"])
+        rounds = re.search(r"Раундов: (\d+)\.", maximum)
+        assert rounds and 1 <= int(rounds[1]) <= 10000
+        car_table = maximum.split("Результаты машин:\n", 1)[1].split("Результаты команд", 1)[0]
+        rows = re.findall(r"^\s*(\d+)\s+(\d+)\s+(\d+)\s+(-?\d+)\s+(финиш|сход|не завершила)$", car_table, re.M)
+        assert len(rows) == 32
+        assert [int(row[0]) for row in rows] == list(range(1, 33))
+        assert {int(row[1]) for row in rows} == set(range(1, 33))
+        for _, id_, team, distance, status in rows:
+            assert int(team) == (int(id_) - 1) // 4 + 1
+            assert -32 <= int(distance) <= 12000
+            if status == "финиш":
+                assert int(distance) == 12000
+            if status == "не завершила":
+                assert int(rounds[1]) == 10000
+        team_table = maximum.split("Результаты команд (по лучшей машине):\n", 1)[1]
+        team_rows = re.findall(r"^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$", team_table, re.M)
+        assert len(team_rows) == 8 and {int(row[1]) for row in team_rows} == set(range(1, 9))
 
-print("CLI: 28 журналов, параметры, повторяемость, лог и прерывания проверены.")
+    for stop_signal in (signal.SIGINT, signal.SIGTERM):
+        process = subprocess.Popen([BINARY, "--teams", "8", "--cars", "4", "--length", "120",
+                                    "--laps", "100", "--rounds", "10000", "--strategy", "random"],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+        first_line = process.stdout.readline()  # Обработчик уже установлен; большой вывод удерживает процесс живым.
+        assert first_line.decode().startswith("Автогонки:")
+        process.send_signal(stop_signal)
+        stdout, stderr = process.communicate(timeout=10)
+        stdout = stdout.decode()
+        stderr = stderr.decode()
+        assert process.returncode == 128 + stop_signal, (process.returncode, stderr)
+        assert "прерывание пользователем" in stdout
+        assert "Результаты команд" in stdout
+        check_trace(first_line.decode() + stdout, 8, 4, 4, 120, 100)
+
+    print("CLI: 28 журналов, две максимальные конфигурации, параметры, повторяемость, ошибки вывода и прерывания проверены.")

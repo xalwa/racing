@@ -1,11 +1,19 @@
-// Проверяем внутренние правила без изменения интерфейса основной программы.
-#define main race_cli_main
-#include "../main.c"
-#undef main
+#include "../race.h"
+#include "../display.h"
+#include "../threads.h"
 #include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void run_round(Race *race) {
+    RaceThreads threads;
+    assert(start_workers(&threads, race) == 0);
+    run_threaded_round(&threads);
+    assert(stop_workers(&threads) == 0);
+}
 
 static Config settings(int lanes, int length) {
-    Config config = {1, 1, lanes, length, 2, 100, GREEDY, 1, 1, NULL, 0};
+    Config config = {1, 1, lanes, length, 2, 100, GREEDY, 1, 1, NULL, 0, 0};
     return config;
 }
 
@@ -92,7 +100,7 @@ static void verify_state(const Race *race, int after_round) {
 
 static void test_start(void) {
     Race race;
-    Config config = {3, 2, 4, 24, 2, 100, GREEDY, 1, 1, NULL, 0};
+    Config config = {3, 2, 4, 24, 2, 100, GREEDY, 1, 1, NULL, 0, 0};
     srand(1);
     initialize_race(&race, config);
     verify_state(&race, 1);
@@ -235,7 +243,7 @@ static void test_small_boards(void) {
 }
 
 static void test_round_invariants(void) {
-    Config config = {8, 4, 2, 33, 2, 100, RANDOM, 0, 1, NULL, 0};
+    Config config = {8, 4, 2, 33, 2, 100, RANDOM, 0, 1, NULL, 0, 0};
     Race race;
     srand(config.seed);
     initialize_race(&race, config);
@@ -265,7 +273,7 @@ static void test_many_races(void) {
     for (int strategy = GREEDY; strategy <= RANDOM; strategy++) {
         for (int seed = 0; seed < 100; seed++) {
             Config config = {1 + seed % 8, 1 + seed % 4, 1 + seed % 6,
-                             33 + seed % 20, 1 + seed % 3, 200, strategy, (unsigned)seed, 1, NULL, 0};
+                             33 + seed % 20, 1 + seed % 3, 200, strategy, (unsigned)seed, 1, NULL, 0, 0};
             Race race;
             srand(config.seed);
             initialize_race(&race, config);
