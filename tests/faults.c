@@ -1,132 +1,122 @@
-// Подмена POSIX-вызовов только в тестах. В саму программу не включается.
+// Только тесты: выбранный вызов завершается ошибкой или замедляет запуск ребёнка.
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <pthread.h>
+#include <mqueue.h>
 #include <semaphore.h>
 #include <signal.h>
-#include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
-#include <sys/syscall.h>
-#include <time.h>
+#include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
-static int creates;
-static int semaphores;
-static int destroyed_semaphores;
-
-static int failure_at(const char *name, int call) {
-    const char *value = getenv(name);
-    return value != NULL && atoi(value) == call;
+static int fail_at(const char *operation, int call) {
+    const char *value = getenv("AKOS_FAIL");
+    return value != NULL && strncmp(value, operation, strlen(operation)) == 0 &&
+           value[strlen(operation)] == ':' && atoi(value + strlen(operation) + 1) == call;
 }
 
-static void record(const char *event) {
-    const char *path = getenv("AKOS_TEST_EVENTS");
-    if (path == NULL) return;
-    int saved = errno;
-    int file = open(path, O_WRONLY | O_CREAT | O_APPEND, 0600);
-    if (file >= 0) {
-        dprintf(file, "%s\n", event);
-        close(file);
-    }
-    errno = saved;
+#define REAL(name) *(void **)(&original) = dlsym(RTLD_NEXT, name)
+
+mqd_t mq_open(const char *name, int flags, ...) {
+    static int calls;
+    mqd_t (*original)(const char *, int, ...); REAL("mq_open");
+    if (fail_at("mq", ++calls)) { errno = ENOSPC; return (mqd_t)-1; }
+    if (!(flags & O_CREAT)) return original(name, flags);
+    va_list args;
+    va_start(args, flags);
+    mode_t mode = va_arg(args, mode_t);
+    struct mq_attr *attr = va_arg(args, struct mq_attr *);
+    va_end(args);
+    return original(name, flags, mode, attr);
 }
 
-int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
-                   void *(*entry)(void *), void *argument) {
-    int (*real_call)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
-    *(void **)(&real_call) = dlsym(RTLD_NEXT, "pthread_create");
-    if (failure_at("AKOS_TEST_FAIL_CREATE", ++creates)) return EAGAIN;
-    if (failure_at("AKOS_TEST_SIGNAL_CREATE", creates)) {
-        record("signal_create");
-        raise(atoi(getenv("AKOS_TEST_SIGNAL_NUMBER")));
-    }
-    int error = real_call(thread, attr, entry, argument);
-    if (error == 0) record("create");
-    return error;
+sem_t *sem_open(const char *name, int flags, ...) {
+    static int calls;
+    sem_t *(*original)(const char *, int, ...); REAL("sem_open");
+    if (fail_at("open", ++calls)) { errno = ENOSPC; return SEM_FAILED; }
+    if (!(flags & O_CREAT)) return original(name, flags);
+    va_list args;
+    va_start(args, flags);
+    mode_t mode = va_arg(args, mode_t);
+    unsigned int value = va_arg(args, unsigned int);
+    va_end(args);
+    return original(name, flags, mode, value);
 }
 
-int pthread_join(pthread_t thread, void **result) {
-    int (*real_call)(pthread_t, void **);
-    *(void **)(&real_call) = dlsym(RTLD_NEXT, "pthread_join");
-    int error = real_call(thread, result);
-    if (error == 0) record("join");
-    return error;
+int sem_close(sem_t *s) {
+    static int calls;
+    int (*original)(sem_t *); REAL("sem_close");
+    if (fail_at("close", ++calls)) { errno = EINVAL; return -1; }
+    return original(s);
+}
+
+int sem_unlink(const char *name) {
+    static int calls;
+    int (*original)(const char *); REAL("sem_unlink");
+    if (fail_at("sem_unlink", ++calls)) { errno = EACCES; return -1; }
+    return original(name);
+}
+
+int shm_open(const char *name, int flags, mode_t mode) {
+    int (*original)(const char *, int, mode_t); REAL("shm_open");
+    if (fail_at("shm", 1)) { errno = ENOSPC; return -1; }
+    return original(name, flags, mode);
+}
+
+int ftruncate(int file, off_t size) {
+    int (*original)(int, off_t); REAL("ftruncate");
+    if (fail_at("truncate", 1)) { errno = ENOSPC; return -1; }
+    return original(file, size);
+}
+
+void *mmap(void *address, size_t size, int protection, int flags, int file, off_t offset) {
+    void *(*original)(void *, size_t, int, int, int, off_t); REAL("mmap");
+    if (fail_at("map", 1)) { errno = ENOMEM; return MAP_FAILED; }
+    return original(address, size, protection, flags, file, offset);
+}
+
+int shm_unlink(const char *name) {
+    static int calls;
+    int (*original)(const char *); REAL("shm_unlink");
+    if (fail_at("unlink", ++calls)) { errno = EACCES; return -1; }
+    return original(name);
 }
 
 int sem_init(sem_t *semaphore, int shared, unsigned int value) {
-    int (*real_call)(sem_t *, int, unsigned int);
-    *(void **)(&real_call) = dlsym(RTLD_NEXT, "sem_init");
-    if (failure_at("AKOS_TEST_FAIL_SEM", ++semaphores)) {
-        errno = ENOSPC;
-        return -1;
-    }
-    int error = real_call(semaphore, shared, value);
-    if (error == 0) record("sem_init");
-    return error;
+    static int calls;
+    int (*original)(sem_t *, int, unsigned int); REAL("sem_init");
+    if (fail_at("sem", ++calls)) { errno = ENOSPC; return -1; }
+    return original(semaphore, shared, value);
 }
 
 int sem_destroy(sem_t *semaphore) {
-    int (*real_call)(sem_t *);
-    *(void **)(&real_call) = dlsym(RTLD_NEXT, "sem_destroy");
-    record("sem_destroy_attempt");
-    if (failure_at("AKOS_TEST_FAIL_DESTROY_SEM", ++destroyed_semaphores)) {
-        errno = EINVAL;
-        return -1;
-    }
-    int error = real_call(semaphore);
-    if (error == 0) record("sem_destroy");
-    return error;
+    static int calls;
+    int (*original)(sem_t *); REAL("sem_destroy");
+    if (fail_at("destroy", ++calls)) { errno = EINVAL; return -1; }
+    return original(semaphore);
 }
 
-int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr) {
-    int (*real_call)(pthread_mutex_t *, const pthread_mutexattr_t *);
-    *(void **)(&real_call) = dlsym(RTLD_NEXT, "pthread_mutex_init");
-    if (getenv("AKOS_TEST_FAIL_MUTEX") != NULL) return EAGAIN;
-    int error = real_call(mutex, attr);
-    if (error == 0) record("mutex_init");
-    return error;
+pid_t fork(void) {
+    static int calls;
+    pid_t (*original)(void); REAL("fork");
+    int number = ++calls;
+    if (fail_at("fork", number)) { errno = EAGAIN; return -1; }
+    pid_t child = original();
+    if (child == 0 && getenv("AKOS_SLOW_CHILD") != NULL) usleep(300000);
+    if (child == 0 && number == 1 && getenv("AKOS_CHILD_EXIT") != NULL) _exit(7);
+    return child;
 }
 
-int pthread_mutex_destroy(pthread_mutex_t *mutex) {
-    int (*real_call)(pthread_mutex_t *);
-    *(void **)(&real_call) = dlsym(RTLD_NEXT, "pthread_mutex_destroy");
-    record("mutex_destroy_attempt");
-    if (getenv("AKOS_TEST_FAIL_DESTROY_MUTEX") != NULL) return EBUSY;
-    int error = real_call(mutex);
-    if (error == 0) record("mutex_destroy");
-    return error;
-}
-
-int sem_wait(sem_t *semaphore) {
-    static _Thread_local int interrupted_once;
-    int (*real_call)(sem_t *);
-    *(void **)(&real_call) = dlsym(RTLD_NEXT, "sem_wait");
-    if (getenv("AKOS_TEST_EINTR") != NULL && !interrupted_once) {
-        interrupted_once = 1;
-        record("eintr");
+int sem_timedwait(sem_t *semaphore, const struct timespec *deadline) {
+    static int interrupted;
+    int (*original)(sem_t *, const struct timespec *); REAL("sem_timedwait");
+    if (!interrupted && getenv("AKOS_EINTR") != NULL) {
+        interrupted = 1;
         errno = EINTR;
         return -1;
     }
-    if (getenv("AKOS_TEST_JITTER") != NULL) {
-        struct timespec delay = {0, (syscall(SYS_gettid) % 13 + 1) * 10000L};
-        nanosleep(&delay, NULL);
-    }
-    return real_call(semaphore);
-}
-
-int fclose(FILE *file) {
-    int (*real_call)(FILE *);
-    *(void **)(&real_call) = dlsym(RTLD_NEXT, "fclose");
-    int error = real_call(file);
-    record("fclose");
-    return error;
-}
-
-int nanosleep(const struct timespec *request, struct timespec *remaining) {
-    int (*real_call)(const struct timespec *, struct timespec *);
-    *(void **)(&real_call) = dlsym(RTLD_NEXT, "nanosleep");
-    if (getenv("AKOS_TEST_SKIP_MAIN_DELAY") != NULL && syscall(SYS_gettid) == getpid()) return 0;
-    return real_call(request, remaining);
+    return original(semaphore, deadline);
 }

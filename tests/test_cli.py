@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 
-BINARY = str(pathlib.Path(sys.argv[1]).resolve())
+BINARY = str(pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "./race").resolve())
 
 
 def run(args=(), expected=0):

@@ -1,4 +1,7 @@
 /race
+/race-named
+/race-judge
+/race-car
 /tests/race_tests
 /race.log
 *.o
@@ -7,7 +10,10 @@ __pycache__/
 .venv/
 ~$*.docx
 /examples.log
-/output
-REPORT.md
+/output/*
+!/output/AKOS_report.docx
 /examples
-/tests/thread_tests
+
+/race-mq-judge
+/race-mq-car
+/delivery

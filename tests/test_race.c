@@ -1,15 +1,17 @@
 #include "../race.h"
 #include "../display.h"
-#include "../threads.h"
+#include "../processes.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
 static void run_round(Race *race) {
-    RaceThreads threads;
-    assert(start_workers(&threads, race) == 0);
-    run_threaded_round(&threads);
-    assert(stop_workers(&threads) == 0);
+    RaceProcesses processes;
+    assert(start_processes(&processes, race) == 0);
+    assert(run_process_round(&processes) == 0);
+    *race = processes.shared->race;
+    assert(stop_processes(&processes, 0) == 0);
+    assert(stop_processes(&processes, 0) == 0);
 }
 
 static Config settings(int lanes, int length) {

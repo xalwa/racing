@@ -1,37 +1,55 @@
 CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Werror -O2
-THREAD_FLAGS = -pthread
-SOURCES = race.c display.c threads.c
-HEADERS = race.h display.h threads.h
-# Зафиксированное состояние ИДЗ №1; извлекается из истории без переключения ветки.
-REFERENCE_REF ?= 3480fc4cf98ce7653480a155baa3fd36151f2a16
+LDLIBS = -pthread -lrt
+COMMON = processes.c queues.c race.c display.c
+HEADERS = processes.h queues.h race.h display.h
 
-.PHONY: all test test-shutdown test-display clean
+.PHONY: all unnamed named independent test test-processes test-display test-variants queues clean
 
-all: race
+all: race race-named race-judge race-car race-mq-judge race-mq-car
+unnamed: race
+named: race-named
+independent: race-judge race-car
+queues: race-mq-judge race-mq-car
 
-race: main.c $(SOURCES) $(HEADERS)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(THREAD_FLAGS) main.c $(SOURCES) $(LDFLAGS) -o $@
+race: main.c $(COMMON) $(HEADERS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) main.c $(COMMON) $(LDFLAGS) $(LDLIBS) -o $@
 
-tests/race_tests: tests/test_race.c $(SOURCES) $(HEADERS)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(THREAD_FLAGS) tests/test_race.c $(SOURCES) $(LDFLAGS) -o $@
+race-named: main.c $(COMMON) $(HEADERS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DRACE_MODE=1 main.c $(COMMON) $(LDFLAGS) $(LDLIBS) -o $@
 
-tests/thread_tests: tests/test_threads.c $(SOURCES) $(HEADERS)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(THREAD_FLAGS) tests/test_threads.c $(SOURCES) $(LDFLAGS) -o $@
+race-judge: main.c $(COMMON) $(HEADERS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DRACE_MODE=2 main.c $(COMMON) $(LDFLAGS) $(LDLIBS) -o $@
 
-test: race tests/race_tests tests/thread_tests
+race-car: car_main.c $(COMMON) $(HEADERS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) car_main.c $(COMMON) $(LDFLAGS) $(LDLIBS) -o $@
+
+race-mq-judge: main.c $(COMMON) $(HEADERS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DRACE_MODE=3 main.c $(COMMON) $(LDFLAGS) $(LDLIBS) -o $@
+
+race-mq-car: car_main.c $(COMMON) $(HEADERS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DQUEUE_WORKER=1 car_main.c $(COMMON) $(LDFLAGS) $(LDLIBS) -o $@
+
+tests/race_tests: tests/test_race.c $(COMMON) $(HEADERS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_race.c $(COMMON) $(LDFLAGS) $(LDLIBS) -o $@
+
+test: all tests/race_tests
 	./tests/race_tests
-	./tests/thread_tests
 	python3 tests/test_cli.py ./race
+	python3 tests/test_processes.py ./race
 	python3 tests/test_animation.py ./race
-	python3 tests/test_threads.py ./race $(REFERENCE_REF)
-	python3 tests/test_shutdown.py ./race
+	python3 tests/test_variants.py
+	python3 tests/test_variants.py --queues
 
-test-shutdown: race
-	python3 tests/test_shutdown.py ./race
+test-processes: race
+	python3 tests/test_processes.py ./race
 
 test-display: race
 	python3 tests/test_animation.py ./race
 
+test-variants: all
+	python3 tests/test_variants.py
+	python3 tests/test_variants.py --queues
+
 clean:
-	$(RM) race tests/race_tests tests/thread_tests
+	$(RM) race race-named race-judge race-car race-mq-judge race-mq-car tests/race_tests

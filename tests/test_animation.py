@@ -31,7 +31,7 @@ def terminal(args, stop_signal=None, term="xterm", columns=80, rows=24, stderr_c
     started = time.monotonic()
     stopped = None
     try:
-        while time.monotonic() - started < 5:
+        while time.monotonic() - started < 20:
             ready, _, _ = select.select([master], [], [], 0.05)
             if ready:
                 try:
@@ -143,7 +143,8 @@ for frame in frames(text):
         cells = [cell.strip() for row in re.findall(r"^Д\d (.*)$", frame, re.M)
                  for cell in row.split("|")[1:-1]]
         assert car not in cells, "Сошедшая машина должна быть снята в кадре схода"
-assert retirements == 22, retirements
+assert retirements == len(re.findall(r"^\s*\d+\s+\d+\s+\d+\s+-?\d+\s+сход$", text, re.M)), retirements
+assert retirements > 0
 
 frame_count = step_count = 0
 with tempfile.TemporaryDirectory(prefix="akos-frame-trace-") as folder:

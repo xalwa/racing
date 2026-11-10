@@ -13,11 +13,27 @@ int screen_active;
 // Только lock-free atomic допустим и для потоков, и для обработчика сигнала.
 _Static_assert(ATOMIC_INT_LOCK_FREE == 2, "Требуется lock-free atomic int");
 atomic_int interrupted;
+void (*output_sink)(int detail, const char *format, va_list args);
+void (*frame_sink)(const Race *, const Car *, const char *, int, int, int, int, const Route *);
+atomic_int *remote_interrupt;
+
+int interruption_requested(void) {
+    if (remote_interrupt != NULL) {
+        int signal_number = atomic_load(remote_interrupt);
+        if (signal_number != 0) atomic_store(&interrupted, signal_number);
+    }
+    return atomic_load(&interrupted);
+}
 
 // Подробные события можно скрыть на экране, но в журнал они попадают всегда.
 void output(int detail, const char *format, ...) {
     va_list args;
     va_start(args, format);
+    if (output_sink != NULL) {
+        output_sink(detail, format, args);
+        va_end(args);
+        return;
+    }
     if (log_file != NULL) {
         va_list copy;
         va_copy(copy, args);
@@ -58,7 +74,11 @@ static void draw_border(int visible, int cell_width) {
 // Отдельный кадр после каждого перехода. Управляющие коды не попадают в журнал.
 void animate_frame(const Race *race, const Car *car, const char *event,
                           int step, int count, int used, int limit, const Route *route) {
-    if (!screen_active || interrupted) return;
+    if (frame_sink != NULL) {
+        frame_sink(race, car, event, step, count, used, limit, route);
+        return;
+    }
+    if (!screen_active || interruption_requested()) return;
     static const int colors[] = {31, 32, 33, 34, 35, 36, 91, 92};
     struct winsize size = {0};
     int columns = 80;
@@ -136,13 +156,12 @@ void animate_frame(const Race *race, const Car *car, const char *event,
     printf("\033[J");
     fflush(stdout);
 
-    // Сигнал может прийти судье или другой машине. Короткие части паузы
-    // позволяют отменить задержку независимо от потока-получателя сигнала.
+    // Проверяем также запрос прерывания от независимо запущенной машины.
     int remaining_ms = race->config.delay_ms;
-    while (remaining_ms > 0 && !atomic_load_explicit(&interrupted, memory_order_relaxed)) {
+    while (remaining_ms > 0 && !interruption_requested()) {
         int part_ms = remaining_ms > 20 ? 20 : remaining_ms;
         struct timespec delay = {0, part_ms * 1000000L};
-        while (!interrupted && nanosleep(&delay, &delay) == -1 && errno == EINTR) {}
+        while (!interruption_requested() && nanosleep(&delay, &delay) == -1 && errno == EINTR) {}
         remaining_ms -= part_ms;
     }
 }
