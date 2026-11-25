@@ -90,6 +90,25 @@ void destination(const Config *config, int direction,
     else (*lane)++;
 }
 
+static int legal_directions(const Race *race, int lane, int position, int remaining,
+                            int visited[MAX_LANES][MAX_LENGTH], int choices[3], int *blocked) {
+    int count = 0;
+    for (int direction = FORWARD; direction <= OUTSIDE; direction++) {
+        int next_lane = lane;
+        int next_position = position;
+        destination(&race->config, direction, &next_lane, &next_position);
+        if (next_lane < 0 || next_lane >= race->config.lanes) continue;
+        if (step_cost(direction) > remaining) continue;
+        if (visited[next_lane][next_position]) continue;
+        if (race->track[next_lane][next_position] != 0) {
+            *blocked = 1;
+            continue;
+        }
+        choices[count++] = direction;
+    }
+    return count;
+}
+
 // Строим один допустимый маршрут. Другие машины во время его выбора неподвижны.
 Route choose_route(const Race *race, const Car *car, int limit,
                           int *blocked) {
@@ -103,20 +122,8 @@ Route choose_route(const Race *race, const Car *car, int limit,
 
     while (route.cost < limit && route.count < MAX_STEPS) {
         int choices[3];
-        int count = 0;
-        for (int direction = FORWARD; direction <= OUTSIDE; direction++) {
-            int next_lane = lane;
-            int next_position = position;
-            destination(&race->config, direction, &next_lane, &next_position);
-            if (next_lane < 0 || next_lane >= race->config.lanes) continue;
-            if (step_cost(direction) > limit - route.cost) continue;
-            if (visited[next_lane][next_position]) continue;
-            if (race->track[next_lane][next_position] != 0) {
-                *blocked = 1;
-                continue;
-            }
-            choices[count++] = direction;
-        }
+        int count = legal_directions(race, lane, position, limit - route.cost,
+                                     visited, choices, blocked);
         if (count == 0) break;
 
         // greedy: вперёд, иначе внутрь, иначе наружу. random: случайный допустимый шаг.
@@ -132,6 +139,41 @@ Route choose_route(const Race *race, const Car *car, int limit,
         if (distance == race->config.laps * race->config.length) break;
     }
     return route;
+}
+
+// Сначала проверяем весь маршрут, не изменяя клетки и положение машины.
+int validate_route(const Race *race, const Car *car, int limit, Route *route, int *blocked) {
+    if (car->status != ACTIVE || limit <= 0 || route->count < 0 || route->count > MAX_STEPS) return 0;
+    int visited[MAX_LANES][MAX_LENGTH] = {{0}};
+    int lane = car->lane;
+    int position = car->position;
+    int distance = car->distance;
+    int finish = race->config.laps * race->config.length;
+    int cost = 0;
+    *blocked = 0;
+    visited[lane][position] = 1;
+    for (int i = 0; ; i++) {
+        if (distance == finish) {
+            if (i != route->count) return 0;
+            break;
+        }
+        int choices[3];
+        int count = legal_directions(race, lane, position, limit - cost, visited, choices, blocked);
+        if (i == route->count) {
+            if (i == 0 && count != 0) return 0;
+            break;
+        }
+        int direction = route->directions[i];
+        int j = 0;
+        while (j < count && choices[j] != direction) j++;
+        if (j == count) return 0;
+        cost += step_cost(direction);
+        destination(&race->config, direction, &lane, &position);
+        visited[lane][position] = 1;
+        if (direction == FORWARD) distance++;
+    }
+    route->cost = cost;
+    return 1;
 }
 
 void execute_route(Race *race, Car *car, const Route *route, int limit) {
@@ -207,24 +249,28 @@ void begin_round(Race *race) {
 
 }
 
-int perform_turn(Race *race, int car_index, int limit) {
+int apply_turn(Race *race, int car_index, int limit, const Route *route, int blocked) {
     Car *car = &race->cars[car_index];
-    int blocked;
-    Route route = choose_route(race, car, limit, &blocked);
     output(1, "Машина %d (команда %d): предел %d.\n", car->id, car->team, limit);
     if (blocked) output(1, "  Блокирование: часть переходов занята другими машинами.\n");
-    if (route.count > 0 || blocked) {
+    if (route->count > 0 || blocked) {
         animate_frame(race, car, blocked ? "Блокирование: занятые клетки исключены" : "Выбран маршрут",
-                      0, route.count, 0, limit, &route);
+                      0, route->count, 0, limit, route);
     }
-    if (route.count == 0) {
+    if (route->count == 0) {
         car->zero_move = 1;
         output(1, "  Нулевой ход: нет допустимого перехода. Сход в конце раунда.\n");
-        animate_frame(race, car, "Нулевой ход. Сход в конце раунда", 0, 0, 0, limit, &route);
+        animate_frame(race, car, "Нулевой ход. Сход в конце раунда", 0, 0, 0, limit, route);
     } else {
-        execute_route(race, car, &route, limit);
+        execute_route(race, car, route, limit);
     }
-    return route.cost;
+    return route->cost;
+}
+
+int perform_turn(Race *race, int car_index, int limit) {
+    int blocked;
+    Route route = choose_route(race, &race->cars[car_index], limit, &blocked);
+    return apply_turn(race, car_index, limit, &route, blocked);
 }
 
 void end_round(Race *race) {

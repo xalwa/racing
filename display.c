@@ -71,13 +71,8 @@ static void draw_border(int visible, int cell_width) {
     printf("\033[K\n");
 }
 
-// Отдельный кадр после каждого перехода. Управляющие коды не попадают в журнал.
-void animate_frame(const Race *race, const Car *car, const char *event,
-                          int step, int count, int used, int limit, const Route *route) {
-    if (frame_sink != NULL) {
-        frame_sink(race, car, event, step, count, used, limit, route);
-        return;
-    }
+void draw_frame(const Race *race, const Car *car, const char *event,
+                int step, int count, int used, int limit, const Route *route) {
     if (!screen_active || interruption_requested()) return;
     static const int colors[] = {31, 32, 33, 34, 35, 36, 91, 92};
     struct winsize size = {0};
@@ -155,7 +150,17 @@ void animate_frame(const Race *race, const Car *car, const char *event,
     }
     printf("\033[J");
     fflush(stdout);
+}
 
+// Отдельный кадр после каждого перехода. Управляющие коды не попадают в журнал.
+void animate_frame(const Race *race, const Car *car, const char *event,
+                   int step, int count, int used, int limit, const Route *route) {
+    if (frame_sink != NULL) {
+        frame_sink(race, car, event, step, count, used, limit, route);
+        return;
+    }
+    if (!screen_active || interruption_requested()) return;
+    draw_frame(race, car, event, step, count, used, limit, route);
     // Проверяем также запрос прерывания от независимо запущенной машины.
     int remaining_ms = race->config.delay_ms;
     while (remaining_ms > 0 && !interruption_requested()) {
