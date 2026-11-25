@@ -16,4 +16,7 @@ __pycache__/
 
 /race-mq-judge
 /race-mq-car
+/race-server
+/race-driver
+/race-watch
 /delivery
